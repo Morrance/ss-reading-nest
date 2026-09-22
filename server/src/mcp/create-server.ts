@@ -17,7 +17,7 @@ export async function createMcpServer(
   );
 }
 
-async function readWidgetHtml() {
+export async function readWidgetHtml() {
   const widgetPath = fileURLToPath(new URL("../../../web/dist/index.html", import.meta.url));
   try {
     return await readFile(widgetPath, "utf8");

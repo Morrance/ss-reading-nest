@@ -8,15 +8,15 @@ const repoRoot = resolve(scriptDir, "../..");
 const htmlPath = resolve(repoRoot, "web/dist/index.html");
 const generatedPath = resolve(repoRoot, "server/src/mcp/reader-widget.generated.ts");
 
-execFileSync("corepack", ["pnpm", "--filter", "@ss/shared", "build"], {
+const corepackOptions = {
   cwd: repoRoot,
-  stdio: "inherit"
-});
+  stdio: "inherit",
+  shell: process.platform === "win32"
+};
 
-execFileSync("corepack", ["pnpm", "--filter", "@ss/web", "build"], {
-  cwd: repoRoot,
-  stdio: "inherit"
-});
+execFileSync("corepack", ["pnpm", "--filter", "@ss/shared", "build"], corepackOptions);
+
+execFileSync("corepack", ["pnpm", "--filter", "@ss/web", "build"], corepackOptions);
 
 const html = readFileSync(htmlPath, "utf8");
 const generated = [

@@ -1,15 +1,26 @@
 import { randomUUID } from "node:crypto";
 import { READING_NEST_APP_VERSION } from "@ss/shared";
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import type { NextFunction, Request, Response } from "express";
-import { createMcpServer } from "./mcp/create-server.js";
+import type { NextFunction, Request as ExpressRequest, Response as ExpressResponse } from "express";
+import { readWidgetHtml } from "./mcp/create-server.js";
+import { createMcpServerFromRepository } from "./mcp/server-factory.js";
+import { JsonReadingRepository } from "./repositories/json-reading-repository.js";
+import { CloudSourceService } from "./services/cloud-source-service.js";
+import { ReadingService } from "./services/reading-service.js";
+import { handleSourceRoute } from "./source-routes.js";
+import { FileSourceObjectStorage } from "./storage/file-source-object-storage.js";
 
 type TransportMap = Record<string, StreamableHTTPServerTransport>;
+type AppOptions = {
+  dataDirectory?: string;
+  token?: string;
+};
 const widgetPath = fileURLToPath(new URL("../../web/dist/index.html", import.meta.url));
 let cachedWidgetAssets:
   | {
@@ -20,9 +31,22 @@ let cachedWidgetAssets:
     }
   | undefined;
 
-export function createApp() {
+export function createApp(options: AppOptions = {}) {
   const app = createMcpExpressApp({ host: "0.0.0.0" });
   const transports: TransportMap = {};
+  const dataDirectory = resolve(options.dataDirectory ?? process.env.DATA_DIR ?? "data");
+  const repository = new JsonReadingRepository(resolve(dataDirectory, "sessions.json"));
+  const sourceService = new CloudSourceService(
+    repository,
+    new FileSourceObjectStorage(resolve(dataDirectory, "objects"))
+  );
+  const readingService = new ReadingService(repository);
+  const token = options.token?.trim() || process.env.MCP_PATH_TOKEN?.trim();
+  const mcpPaths = token
+    ? [`/mcp/${token}`, `/mcp/${token}/ios-v2`, `/mcp/${token}/ios-v3`, `/mcp/${token}/ios-v4`]
+    : ["/mcp"];
+  const sourceBase = token ? `/source/${token}` : "/source";
+  const widgetHtml = readWidgetHtml();
   app.use(validateDevelopmentHost);
 
   app.get("/health", (_request, response) => {
@@ -44,7 +68,7 @@ export function createApp() {
     sendCompressedAsset(_request, response, assets.style, assets.styleGzip, "text/css");
   });
 
-  app.post("/mcp", async (request: Request, response: Response) => {
+  const handleMcpPost = async (request: ExpressRequest, response: ExpressResponse) => {
     try {
       const sessionId = request.headers["mcp-session-id"] as string | undefined;
       let transport = sessionId ? transports[sessionId] : undefined;
@@ -60,12 +84,15 @@ export function createApp() {
           if (transport?.sessionId) delete transports[transport.sessionId];
         };
         const publicOrigin = getPublicOrigin(request);
-        await (
-          await createMcpServer(undefined, {
+        await createMcpServerFromRepository(
+          repository,
+          await widgetHtml,
+          sourceService,
+          {
             workerOrigin: publicOrigin,
-            sourceEndpointBase: publicOrigin,
+            sourceEndpointBase: `${publicOrigin}${sourceBase}`,
             lightweightSchemas: isTunnelOrigin(publicOrigin)
-          })
+          }
         ).connect(transport);
       }
 
@@ -87,28 +114,56 @@ export function createApp() {
         });
       }
     }
-  });
+  };
 
-  app.get("/mcp", async (request: Request, response: Response) => {
+  const handleMcpGet = async (request: ExpressRequest, response: ExpressResponse) => {
     const sessionId = request.headers["mcp-session-id"] as string | undefined;
     const transport = sessionId ? transports[sessionId] : undefined;
     if (!transport) return response.status(400).send("Invalid or missing MCP session ID");
     await transport.handleRequest(request, response);
-  });
+  };
 
-  app.delete("/mcp", async (request: Request, response: Response) => {
+  const handleMcpDelete = async (request: ExpressRequest, response: ExpressResponse) => {
     const sessionId = request.headers["mcp-session-id"] as string | undefined;
     const transport = sessionId ? transports[sessionId] : undefined;
     if (!transport) return response.status(400).send("Invalid or missing MCP session ID");
     await transport.handleRequest(request, response);
-  });
+  };
+
+  for (const path of mcpPaths) {
+    app.post(path, handleMcpPost);
+    app.get(path, handleMcpGet);
+    app.delete(path, handleMcpDelete);
+  }
+
+  for (const action of ["upload", "restore", "state", "bootstrap"] as const) {
+    app.all(`${sourceBase}/${action}`, async (request, response) => {
+      const publicOrigin = getPublicOrigin(request);
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(request.headers)) {
+        if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(",") : value);
+      }
+      const method = request.method.toUpperCase();
+      const body = method === "GET" || method === "HEAD" || method === "OPTIONS"
+        ? undefined
+        : JSON.stringify(request.body ?? {});
+      const webResponse = await handleSourceRoute(
+        new globalThis.Request(`${publicOrigin}${request.originalUrl}`, { method, headers, body }),
+        sourceService,
+        readingService
+      );
+      response.status(webResponse.status);
+      webResponse.headers.forEach((value, name) => response.setHeader(name, value));
+      response.send(Buffer.from(await webResponse.arrayBuffer()));
+    });
+  }
 
   app.use(proxyViteDevelopmentAsset);
 
   return app;
 }
 
-function validateDevelopmentHost(request: Request, response: Response, next: NextFunction) {
+function validateDevelopmentHost(request: ExpressRequest, response: ExpressResponse, next: NextFunction) {
   const hostname = parseHostname(request.headers.host);
   if (hostname && isAllowedHost(hostname)) return next();
   response.status(403).json({
@@ -143,7 +198,7 @@ function allowedHostsFromEnv(): string[] {
     .filter(Boolean);
 }
 
-function getPublicOrigin(request: Request): string {
+function getPublicOrigin(request: ExpressRequest): string {
   const forwardedProto = headerValue(request.headers["x-forwarded-proto"]);
   const proto = forwardedProto ?? request.protocol;
   const host = request.headers.host ?? "localhost:8787";
@@ -163,8 +218,8 @@ function isTunnelOrigin(origin: string): boolean {
 }
 
 async function proxyViteDevelopmentAsset(
-  request: Request,
-  response: Response,
+  request: ExpressRequest,
+  response: ExpressResponse,
   next: NextFunction
 ) {
   if (request.method !== "GET" && request.method !== "HEAD") return next();
@@ -202,8 +257,8 @@ async function readWidgetAssets() {
 }
 
 function sendCompressedAsset(
-  request: Request,
-  response: Response,
+  request: ExpressRequest,
+  response: ExpressResponse,
   raw: string,
   gzipped: Buffer,
   contentType: string
