@@ -53,7 +53,7 @@ export function createApp(options: AppOptions = {}) {
     response.set("cache-control", "no-store");
     response.json({
       ok: true,
-      app: "冰冰和星星的小书房",
+      app: "我和萧遥的小书房",
       version: READING_NEST_APP_VERSION
     });
   });
@@ -188,6 +188,7 @@ function parseHostname(hostHeader: string | undefined): string | undefined {
 function isAllowedHost(hostname: string): boolean {
   if (["localhost", "127.0.0.1", "[::1]"].includes(hostname)) return true;
   if (hostname.endsWith(".trycloudflare.com")) return true;
+  if (hostname === "sealos.run" || hostname.endsWith(".sealos.run")) return true;
   return allowedHostsFromEnv().includes(hostname);
 }
 

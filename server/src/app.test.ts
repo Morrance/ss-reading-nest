@@ -10,7 +10,12 @@ describe("server app", () => {
     const response = await request(createApp()).get("/health");
     expect(response.status).toBe(200);
     expect(response.headers["cache-control"]).toBe("no-store");
-    expect(response.body).toEqual({ ok: true, app: "冰冰和星星的小书房", version: "0.3.34" });
+    expect(response.body).toEqual({ ok: true, app: "我和萧遥的小书房", version: "0.3.34" });
+  });
+
+  it("accepts Sealos public hostnames", async () => {
+    const response = await request(createApp()).get("/health").set("host", "reading.example.sealos.run");
+    expect(response.status).toBe(200);
   });
 
   it("accepts an MCP initialize request", async () => {

@@ -78,7 +78,7 @@ export function registerReadingResource(
   for (const uri of [READING_NEST_URI, ...READING_NEST_LEGACY_URIS]) {
     registerAppResource(
       server,
-      "冰冰和星星的小书房",
+      "我和萧遥的小书房",
       uri,
       {
         description: "移动端优先的小说共读小窝",
@@ -119,7 +119,7 @@ export function registerReadingCompatibilityProbeResource(server: McpServer, wor
     widgetDomain,
     resourceCsp,
     openaiWidgetCsp,
-    "一个最小的 ChatGPT App 组件，用于确认原生客户端能否渲染 冰冰和星星的小书房 小窝。"
+    "一个最小的 ChatGPT App 组件，用于确认原生客户端能否渲染我和萧遥的小书房。"
   );
 
   for (const uri of [
@@ -128,10 +128,10 @@ export function registerReadingCompatibilityProbeResource(server: McpServer, wor
   ]) {
     registerAppResource(
       server,
-      "冰冰和星星的小书房 App 兼容性检查",
+      "我和萧遥的小书房 App 兼容性检查",
       uri,
       {
-        description: "一个最小的 ChatGPT App 组件，用于确认原生客户端能否渲染 冰冰和星星的小书房 小窝。",
+        description: "一个最小的 ChatGPT App 组件，用于确认原生客户端能否渲染我和萧遥的小书房。",
         _meta: resourceMeta
       },
       async () => ({

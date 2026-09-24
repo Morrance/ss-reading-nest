@@ -104,7 +104,7 @@ describe("registerReadingResource", () => {
     expect(probeUri).toBe("ui://ss-reading-nest/app-compat-v3.html");
     expect(probeDescriptor._meta.ui.prefersBorder).toBe(true);
     const probe = await probeLoader();
-    expect(probe.contents[0].text).toContain("冰冰和星星的小书房 App 组件已显示");
+    expect(probe.contents[0].text).toContain("我和萧遥的小书房 App 组件已显示");
     expect(probe.contents[0]._meta.ui.csp.connectDomains).toContain(
       "http://localhost:8787"
     );
